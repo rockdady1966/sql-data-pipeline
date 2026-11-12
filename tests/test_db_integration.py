@@ -1,8 +1,9 @@
 import pytest
-import pandas as pd
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
+
 from pipeline.db import get_db_engine
+
 
 @pytest.fixture(scope="module")
 def postgres_engine():

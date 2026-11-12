@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def transform_sales_data(df: pd.DataFrame) -> pd.DataFrame:
     """Transforms raw sales data: cleans nulls and calculates net revenue."""
     if df.empty:

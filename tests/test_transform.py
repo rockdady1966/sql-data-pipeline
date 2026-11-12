@@ -1,5 +1,7 @@
 import pandas as pd
+
 from pipeline.transform import transform_sales_data
+
 
 def test_transform_sales_data_net_calculation():
     raw_data = pd.DataFrame({

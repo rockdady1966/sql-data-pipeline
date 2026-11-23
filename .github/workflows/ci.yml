@@ -30,10 +30,15 @@ jobs:
       - name: Install Microsoft ODBC Driver 18 & sqlcmd
         run: |
           sudo mkdir -p /usr/share/keyrings
-          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-legacy.gpg
-          curl -fsSL https://packages.microsoft.com/keys/microsoft-rolling.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-rolling.gpg
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+          curl -fsSL https://packages.microsoft.com/keys/microsoft-rolling.asc | sudo gpg --batch --yes --dearmor >> /usr/share/keyrings/microsoft-prod.gpg
+          sudo chmod 644 /usr/share/keyrings/microsoft-prod.gpg
+          sudo rm -f /etc/apt/sources.list.d/mssql-release.list
           UBUNTU_VER=$(. /etc/os-release && echo "$VERSION_ID")
-          echo "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft-legacy.gpg,/usr/share/keyrings/microsoft-rolling.gpg] https://packages.microsoft.com/ubuntu/${UBUNTU_VER}/prod $(. /etc/os-release && echo "$VERSION_CODENAME") main" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          if [ ! -f "/etc/apt/sources.list.d/microsoft-prod.list" ] && ! grep -rq "packages.microsoft.com/ubuntu/${UBUNTU_VER}/prod" /etc/apt/sources.list.d/; then
+            echo "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${UBUNTU_VER}/prod ${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          fi
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 mssql-tools18 unixodbc-dev
           echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> $GITHUB_PATH

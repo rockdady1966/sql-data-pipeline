@@ -1,33 +1,71 @@
-name: Pipeline CI Workflow
+name: WWI Pipeline CI
 
 on:
-  pull_request:
-    branches: [ "main" ]
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  validate-and-test:
+  test:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Check out Repository
-        uses: actions/checkout@v4
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "StrongTestPassword!2026"
+        ports:
+          - 1433:1433
 
-      - name: Set up Python
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: "3.12"
 
-      - name: Install Dependencies
+      - name: Install Microsoft ODBC Driver 18 & sqlcmd
+        run: |
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+          curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 mssql-tools18 unixodbc-dev
+          echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> $GITHUB_PATH
+
+      - name: Install Python dependencies
+        working-directory: python_projects/wwi-pipeline
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install -r requirements.txt pytest ruff
 
-      - name: Run Ruff Linter
+      - name: Lint with ruff
+        working-directory: python_projects/wwi-pipeline
         run: ruff check .
 
-      - name: Run Pytest Suite
+      - name: Run unit tests
+        working-directory: python_projects/wwi-pipeline
+        run: pytest -v tests/test_pipeline.py -k "not integration"
+
+      - name: Wait for SQL Server & provision ETL objects
+        working-directory: python_projects/wwi-pipeline
+        env:
+          SA_PASSWORD: "StrongTestPassword!2026"
         run: |
-          pytest --cov=src/pipeline tests/
+          for i in {1..30}; do
+            if sqlcmd -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "SQL Server is ready."
+              break
+            fi
+            sleep 2
+          done
+          sqlcmd -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -i sql/setup_etl.sql
+
+      - name: Run DW integration tests
+        working-directory: python_projects/wwi-pipeline
+        env:
+          DB_ODBC_DRIVER: "ODBC Driver 18 for SQL Server"
+          TEST_DW_CONN_STR: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost,1433;DATABASE=WideWorldImportersDW;UID=sa;PWD=StrongTestPassword!2026;TrustServerCertificate=yes;"
+        run: pytest -v tests/test_pipeline.py -k "integration"

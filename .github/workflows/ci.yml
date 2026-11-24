@@ -47,14 +47,12 @@ jobs:
         working-directory: python_projects/wwi-pipeline
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt pytest ruff
-          elif [ -f pyproject.toml ]; then
-            pip install . pytest ruff
+          if [ -f pyproject.toml ]; then
+            pip install . python-dotenv pytest ruff
           elif [ -f ../../pyproject.toml ]; then
-            pip install ../../ pytest ruff
+            pip install ../../ python-dotenv pytest ruff
           else
-            pip install pytest ruff
+            pip install python-dotenv pytest ruff
           fi
 
       - name: Lint with ruff

@@ -68,14 +68,18 @@ jobs:
         env:
           SA_PASSWORD: "StrongTestPassword!2026"
         run: |
+          SQLCMD_BIN="sqlcmd"
+          if ! command -v sqlcmd >/dev/null 2>&1 && [ -x "/opt/mssql-tools18/bin/sqlcmd" ]; then
+            SQLCMD_BIN="/opt/mssql-tools18/bin/sqlcmd"
+          fi
           for i in {1..30}; do
-            if sqlcmd -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
+            if "$SQLCMD_BIN" -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
               echo "SQL Server is ready."
               break
             fi
             sleep 2
           done
-          sqlcmd -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -i sql/setup_etl.sql
+          "$SQLCMD_BIN" -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -i sql/setup_etl.sql
 
       - name: Run DW integration tests
         working-directory: python_projects/wwi-pipeline

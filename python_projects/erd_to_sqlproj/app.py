@@ -1,8 +1,11 @@
 import os
 import re
+from typing import Annotated
+
+import anyio
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 
 # Load configurable paths from .env
@@ -95,51 +98,59 @@ HTML_CONTENT = """
 </html>
 """
 
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTML_CONTENT
 
+
 @app.post("/api/generate-sqlproj")
-async def generate_sqlproj(file: UploadFile = File(...)):
-    if not file.filename.endswith(".md"):
+async def generate_sqlproj(file: Annotated[UploadFile, File()]):
+    if not file.filename or not file.filename.endswith(".md"):
         raise HTTPException(status_code=400, detail="Only .md files are supported.")
 
     content = await file.read()
     md_text = content.decode("utf-8")
 
     # Extract the SQL code block from the Markdown
-    sql_match = re.search(r'```sql\s*(.*?)\s*```', md_text, re.DOTALL | re.IGNORECASE)
+    sql_match = re.search(r"```sql\s*(.*?)\s*```", md_text, re.DOTALL | re.IGNORECASE)
     if not sql_match:
-        raise HTTPException(status_code=400, detail="No SQL block found in the provided Markdown file.")
-    
+        raise HTTPException(
+            status_code=400, detail="No SQL block found in the provided Markdown file."
+        )
+
     sql_script = sql_match.group(1)
 
     # Regex to extract individual CREATE TABLE statements
-    table_pattern = re.compile(r'(CREATE TABLE\s+(?:\[?.*?\]?\.?)?\[?(\w+)\]?\s*\([\s\S]*?\);)', re.IGNORECASE)
+    table_pattern = re.compile(
+        r"(CREATE TABLE\s+(?:\[?.*?\]?\.?)?\[?(\w+)\]?\s*\([\s\S]*?\);)", re.IGNORECASE
+    )
     matches = table_pattern.finditer(sql_script)
 
     generated_files = []
-    
+
     for match in matches:
         full_ddl = match.group(1).strip()
         table_name = match.group(2)
-        
+
         file_name = f"{table_name}.sql"
         file_path = os.path.join(TABLES_DIR, file_name)
-        
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(full_ddl)
-            
+
+        await anyio.Path(file_path).write_text(full_ddl, encoding="utf-8")
+
         generated_files.append(file_path)
 
     if not generated_files:
-        return {"message": "SQL block found, but no CREATE TABLE statements were parsed."}
+        return {
+            "message": "SQL block found, but no CREATE TABLE statements were parsed."
+        }
 
     return {
         "message": "Successfully generated .sqlproj files.",
         "output_directory": TABLES_DIR,
-        "files_created": generated_files
+        "files_created": generated_files,
     }
+
 
 if __name__ == "__main__":
     print("Starting API and Front End...")

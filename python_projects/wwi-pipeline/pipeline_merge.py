@@ -1,39 +1,41 @@
 import os
 import re
 from pathlib import Path
+
 import pandas as pd
 import pyodbc
 from config import CONN_STRING, DB_PASSWORD, DB_USER, SERVER
 
+
 def _resolve_odbc_driver() -> str:
-  """Resolves the SQL Server ODBC driver name safely across environments."""
-  configured = os.getenv("DB_ODBC_DRIVER", "").strip()
-  if configured:
-    return configured
+    """Resolves the SQL Server ODBC driver name safely across environments."""
+    configured = os.getenv("DB_ODBC_DRIVER", "").strip()
+    if configured:
+        return configured
 
-  try:
-    installed = pyodbc.drivers()
-  except Exception:
-    installed = []
+    try:
+      installed = pyodbc.drivers()
+    except (pyodbc.Error, RuntimeError):
+        installed = []
 
-  for candidate in (
-      "ODBC Driver 18 for SQL Server",
-      "ODBC Driver 17 for SQL Server",
-  ):
-    if candidate in installed:
-      return candidate
+    for candidate in (
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+    ):
+        if candidate in installed:
+            return candidate
 
-  versioned = []
-  for drv in installed:
-    match = re.fullmatch(r"ODBC Driver (\d+) for SQL Server", drv.strip())
-    if match:
-      versioned.append((int(match.group(1)), drv.strip()))
+    versioned = []
+    for drv in installed:
+        match = re.fullmatch(r"ODBC Driver (\d+) for SQL Server", drv.strip())
+        if match:
+            versioned.append((int(match.group(1)), drv.strip()))
 
-  if versioned:
-    versioned.sort(key=lambda item: item[0], reverse=True)
-    return versioned[0][1]
+    if versioned:
+        versioned.sort(key=lambda item: item[0], reverse=True)
+        return versioned[0][1]
 
-  return "ODBC Driver 17 for SQL Server"
+    return "ODBC Driver 17 for SQL Server"
 
 
 def build_dw_conn_string(
@@ -44,38 +46,40 @@ def build_dw_conn_string(
     driver: str | None = None,
     trust_server_cert: bool | None = None,
 ) -> str:
-  """Builds a hardened ODBC connection string targeting the data warehouse."""
-  if not server or not database:
-    raise ValueError("Both 'server' and 'database' must be non-empty.")
+    """Builds a hardened ODBC connection string targeting the data warehouse."""
+    if not server or not database:
+        raise ValueError("Both 'server' and 'database' must be non-empty.")
 
-  resolved_driver = (driver or _resolve_odbc_driver()).strip()
-  clean_driver = resolved_driver.removeprefix("{").removesuffix("}")
+    resolved_driver = (driver or _resolve_odbc_driver()).strip()
+    clean_driver = resolved_driver.removeprefix("{").removesuffix("}")
 
-  if trust_server_cert is None:
-    env_trust = os.getenv("DB_TRUST_SERVER_CERT", "").strip().lower()
-    if env_trust in {"1", "true", "yes"}:
-      trust_server_cert = True
-    elif env_trust in {"0", "false", "no"}:
-      trust_server_cert = False
+    if trust_server_cert is None:
+        env_trust = os.getenv("DB_TRUST_SERVER_CERT", "").strip().lower()
+        if env_trust in {"1", "true", "yes"}:
+            trust_server_cert = True
+        elif env_trust in {"0", "false", "no"}:
+            trust_server_cert = False
+        else:
+            trust_server_cert = (
+                "Driver 18" in clean_driver or "Driver 19" in clean_driver
+            )
+
+    parts = [
+        f"DRIVER={{{clean_driver}}}",
+        f"SERVER={server}",
+        f"DATABASE={database}",
+    ]
+
+    if user and password:
+        parts.append(f"UID={user}")
+        parts.append(f"PWD={password}")
     else:
-      trust_server_cert = "Driver 18" in clean_driver or "Driver 19" in clean_driver
+        parts.append("Trusted_Connection=yes")
 
-  parts = [
-      f"DRIVER={{{clean_driver}}}",
-      f"SERVER={server}",
-      f"DATABASE={database}",
-  ]
+    if trust_server_cert:
+        parts.append("TrustServerCertificate=yes")
 
-  if user and password:
-    parts.append(f"UID={user}")
-    parts.append(f"PWD={password}")
-  else:
-    parts.append("Trusted_Connection=yes")
-
-  if trust_server_cert:
-    parts.append("TrustServerCertificate=yes")
-
-  return ";".join(parts) + ";"
+    return ";".join(parts) + ";"
 
 
 def extract_customers(conn_str: str = CONN_STRING) -> pd.DataFrame:
@@ -94,12 +98,14 @@ def extract_customers(conn_str: str = CONN_STRING) -> pd.DataFrame:
             df = pd.read_sql(query, conn)
         print(f"Extracted {len(df)} customer records from source OLTP.")
         return df
-    except Exception as e:
+    except (pyodbc.Error, ValueError, RuntimeError) as e:
         print(f"Customer extraction failed: {e}")
         return pd.DataFrame()
 
 
-def transform_and_export(df: pd.DataFrame, output_dir: str | Path = "output") -> Path | None:
+def transform_and_export(
+    df: pd.DataFrame, output_dir: str | Path = "output"
+) -> Path | None:
     """Transforms data and writes local staging CSV files."""
     print("--- TRANSFORM & EXPORT PHASE ---")
     if df.empty:
@@ -146,7 +152,7 @@ def load_and_merge_dw(df: pd.DataFrame, conn_str: str | None = None) -> None:
             conn.commit()
             print("Merge procedure executed successfully in WideWorldImportersDW!")
 
-    except Exception as e:
+    except (pyodbc.Error, ValueError, RuntimeError) as e:
         print(f"DW Load & Merge failed: {e}")
 
 

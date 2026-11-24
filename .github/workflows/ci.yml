@@ -79,7 +79,9 @@ jobs:
             fi
             sleep 2
           done
+          "$SQLCMD_BIN" -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -Q "IF DB_ID(N'WideWorldImportersDW') IS NULL CREATE DATABASE [WideWorldImportersDW];"
           "$SQLCMD_BIN" -S localhost,1433 -U sa -P "$SA_PASSWORD" -C -i sql/setup_etl.sql
+
 
       - name: Run DW integration tests
         working-directory: python_projects/wwi-pipeline
